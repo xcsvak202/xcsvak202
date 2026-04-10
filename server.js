@@ -5,9 +5,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 let browser;
+let context;
 let page;
 
-// parser remix (decode response aneh)
+// parser remix
 function parseRemixArray(data) {
   function resolve(val) {
     if (typeof val === "object" && val !== null) {
@@ -24,22 +25,22 @@ function parseRemixArray(data) {
   return resolve(data[2]);
 }
 
-// init browser (sekali doang)
+// init browser
 async function initBrowser() {
   browser = await chromium.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"]
   });
 
-  const context = await browser.newContext();
+  context = await browser.newContext();
   page = await context.newPage();
 
-  console.log("Warmup nawala...");
-  await page.goto("https://nawala.dev");
-  console.log("Browser ready 🚀");
+  console.log("Warmup...");
+  await page.goto("https://nawala.dev", { waitUntil: "domcontentloaded" });
+  console.log("Ready 🚀");
 }
 
-// endpoint GET (multi domain)
+// endpoint
 app.get("/api/cek", async (req, res) => {
   try {
     let domains = req.query.domain;
@@ -48,7 +49,7 @@ app.get("/api/cek", async (req, res) => {
       return res.json({ error: "domain kosong" });
     }
 
-    // support banyak format
+    // normalize input
     domains = domains
       .split(/[\n, ]+/)
       .map(d => d.trim())
@@ -56,24 +57,37 @@ app.get("/api/cek", async (req, res) => {
       .slice(0, 100)
       .join(",");
 
+    // refresh page tiap request biar aman
+    await page.goto("https://nawala.dev", { waitUntil: "domcontentloaded" });
+
     const data = await page.evaluate(async (domains) => {
-      const res = await fetch("/_root.data?index", {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded"
-        },
-        body: `domains=${domains}`
-      });
-      return await res.text();
+      try {
+        const res = await fetch("/_root.data?index", {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded"
+          },
+          body: `domains=${domains}`
+        });
+
+        return await res.text();
+      } catch (e) {
+        return JSON.stringify({ error: "fetch failed inside browser" });
+      }
     }, domains);
 
     const raw = JSON.parse(data);
+
+    // kalau error dari dalam browser
+    if (raw.error) {
+      return res.json(raw);
+    }
+
     const parsed = parseRemixArray(raw);
 
-    // clean response
     const clean = {
-      results: parsed.results,
-      summary: parsed.summary,
+      results: parsed.results || [],
+      summary: parsed.summary || {},
       rateLimited: parsed.rateLimited,
       cached: parsed.cached
     };
@@ -81,13 +95,13 @@ app.get("/api/cek", async (req, res) => {
     res.json(clean);
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "error fetch" });
+    console.error("ERROR:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
 app.get("/", (req, res) => {
-  res.send("API Nawala READY 🚀");
+  res.send("API Nawala FINAL READY 🚀");
 });
 
 app.listen(PORT, async () => {
