@@ -32,12 +32,20 @@ async function initBrowser() {
     args: ["--no-sandbox", "--disable-setuid-sandbox"]
   });
 
-  context = await browser.newContext();
+  context = await browser.newContext({
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+  });
+
   page = await context.newPage();
 
   console.log("Warmup...");
   await page.goto("https://nawala.dev", { waitUntil: "domcontentloaded" });
-  console.log("Ready 🚀");
+
+  // delay biar lolos Cloudflare
+  await new Promise(r => setTimeout(r, 2000));
+
+  console.log("Browser ready 🚀");
 }
 
 // endpoint
@@ -49,7 +57,6 @@ app.get("/api/cek", async (req, res) => {
       return res.json({ error: "domain kosong" });
     }
 
-    // normalize input
     domains = domains
       .split(/[\n, ]+/)
       .map(d => d.trim())
@@ -57,11 +64,12 @@ app.get("/api/cek", async (req, res) => {
       .slice(0, 100)
       .join(",");
 
-    // refresh page tiap request biar aman
+    // refresh page setiap request
     await page.goto("https://nawala.dev", { waitUntil: "domcontentloaded" });
+    await new Promise(r => setTimeout(r, 1500));
 
     const data = await page.evaluate(async (domains) => {
-      try {
+      async function tryFetch() {
         const res = await fetch("/_root.data?index", {
           method: "POST",
           headers: {
@@ -71,18 +79,25 @@ app.get("/api/cek", async (req, res) => {
         });
 
         return await res.text();
-      } catch (e) {
-        return JSON.stringify({ error: "fetch failed inside browser" });
       }
+
+      let result = await tryFetch();
+
+      // retry kalau kena HTML (Cloudflare)
+      if (result.startsWith("<")) {
+        await new Promise(r => setTimeout(r, 2000));
+        result = await tryFetch();
+      }
+
+      return result;
     }, domains);
 
-    const raw = JSON.parse(data);
-
-    // kalau error dari dalam browser
-    if (raw.error) {
-      return res.json(raw);
+    // kalau masih HTML
+    if (data.startsWith("<")) {
+      return res.json({ error: "kena Cloudflare (retry lagi)" });
     }
 
+    const raw = JSON.parse(data);
     const parsed = parseRemixArray(raw);
 
     const clean = {
