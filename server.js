@@ -7,7 +7,7 @@ const PORT = process.env.PORT || 3000;
 let browser;
 let page;
 
-// parser remix
+// parser remix (decode response aneh)
 function parseRemixArray(data) {
   function resolve(val) {
     if (typeof val === "object" && val !== null) {
@@ -24,7 +24,7 @@ function parseRemixArray(data) {
   return resolve(data[2]);
 }
 
-// init browser sekali
+// init browser (sekali doang)
 async function initBrowser() {
   browser = await chromium.launch({
     headless: true,
@@ -36,12 +36,10 @@ async function initBrowser() {
 
   console.log("Warmup nawala...");
   await page.goto("https://nawala.dev");
-  console.log("Ready 🚀");
+  console.log("Browser ready 🚀");
 }
 
-// ===============================
-// ENDPOINT MULTI DOMAIN
-// ===============================
+// endpoint GET (multi domain)
 app.get("/api/cek", async (req, res) => {
   try {
     let domains = req.query.domain;
@@ -50,7 +48,7 @@ app.get("/api/cek", async (req, res) => {
       return res.json({ error: "domain kosong" });
     }
 
-    // support koma / spasi / enter
+    // support banyak format
     domains = domains
       .split(/[\n, ]+/)
       .map(d => d.trim())
@@ -72,7 +70,7 @@ app.get("/api/cek", async (req, res) => {
     const raw = JSON.parse(data);
     const parsed = parseRemixArray(raw);
 
-    // clean output
+    // clean response
     const clean = {
       results: parsed.results,
       summary: parsed.summary,
@@ -89,7 +87,7 @@ app.get("/api/cek", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-  res.send("API Nawala MULTI DOMAIN aktif 🚀");
+  res.send("API Nawala READY 🚀");
 });
 
 app.listen(PORT, async () => {
