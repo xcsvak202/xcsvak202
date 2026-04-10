@@ -1,14 +1,20 @@
 const express = require("express");
-const { chromium } = require("playwright");
+const { chromium } = require("playwright-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+
+chromium.use(StealthPlugin());
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 let browser;
-let context;
 let page;
 
-// parser remix
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+// parser
 function parseRemixArray(data) {
   function resolve(val) {
     if (typeof val === "object" && val !== null) {
@@ -25,14 +31,13 @@ function parseRemixArray(data) {
   return resolve(data[2]);
 }
 
-// init browser
 async function initBrowser() {
   browser = await chromium.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"]
   });
 
-  context = await browser.newContext({
+  const context = await browser.newContext({
     userAgent:
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
   });
@@ -40,15 +45,12 @@ async function initBrowser() {
   page = await context.newPage();
 
   console.log("Warmup...");
-  await page.goto("https://nawala.dev", { waitUntil: "domcontentloaded" });
+  await page.goto("https://nawala.dev");
+  await sleep(3000);
 
-  // delay biar lolos Cloudflare
-  await new Promise(r => setTimeout(r, 2000));
-
-  console.log("Browser ready 🚀");
+  console.log("READY 🚀");
 }
 
-// endpoint
 app.get("/api/cek", async (req, res) => {
   try {
     let domains = req.query.domain;
@@ -64,12 +66,14 @@ app.get("/api/cek", async (req, res) => {
       .slice(0, 100)
       .join(",");
 
-    // refresh page setiap request
-    await page.goto("https://nawala.dev", { waitUntil: "domcontentloaded" });
-    await new Promise(r => setTimeout(r, 1500));
+    // refresh + delay
+    await page.goto("https://nawala.dev");
+    await sleep(2000);
 
-    const data = await page.evaluate(async (domains) => {
-      async function tryFetch() {
+    let data;
+
+    for (let i = 0; i < 3; i++) {
+      data = await page.evaluate(async (domains) => {
         const res = await fetch("/_root.data?index", {
           method: "POST",
           headers: {
@@ -77,49 +81,38 @@ app.get("/api/cek", async (req, res) => {
           },
           body: `domains=${domains}`
         });
-
         return await res.text();
-      }
+      }, domains);
 
-      let result = await tryFetch();
+      if (!data.startsWith("<")) break;
 
-      // retry kalau kena HTML (Cloudflare)
-      if (result.startsWith("<")) {
-        await new Promise(r => setTimeout(r, 2000));
-        result = await tryFetch();
-      }
+      // retry delay
+      await sleep(2000);
+    }
 
-      return result;
-    }, domains);
-
-    // kalau masih HTML
     if (data.startsWith("<")) {
-      return res.json({ error: "kena Cloudflare (retry lagi)" });
+      return res.json({ error: "Cloudflare masih block (retry lagi)" });
     }
 
     const raw = JSON.parse(data);
     const parsed = parseRemixArray(raw);
 
-    const clean = {
-      results: parsed.results || [],
-      summary: parsed.summary || {},
-      rateLimited: parsed.rateLimited,
-      cached: parsed.cached
-    };
-
-    res.json(clean);
+    res.json({
+      results: parsed.results,
+      summary: parsed.summary
+    });
 
   } catch (err) {
-    console.error("ERROR:", err);
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.json({ error: "fail fetch" });
   }
 });
 
 app.get("/", (req, res) => {
-  res.send("API Nawala FINAL READY 🚀");
+  res.send("FREE VERSION READY 🔥");
 });
 
 app.listen(PORT, async () => {
-  console.log("Server jalan di port " + PORT);
+  console.log("Server jalan " + PORT);
   await initBrowser();
 });
